@@ -174,7 +174,77 @@ class PromptAgent:
             }
         )
 
-    def predict(self, obs: Dict = None, num_samples=5) -> List:
+    def predict(self, obs: Dict = None) -> List:
+        """
+        Predict the next action(s) based on the current observation.
+        """
+
+        assert len(self.observations) == len(self.actions) and len(self.actions) == len(
+            self.thoughts
+        ), "The number of observations and actions should be the same."
+
+        status = False
+        while not status:
+            messages = self.history_messages.copy()
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Observation: {}\n".format(str(obs))}
+                    ],
+                }
+            )
+            status, response = call_llm(
+                {
+                    "model": self.model,
+                    "messages": messages,
+                    "max_tokens": self.max_tokens,
+                    "top_p": self.top_p,
+                    "temperature": self.temperature,
+                }
+            )
+            response = response.strip()
+            if not status:
+                if response in [
+                    "context_length_exceeded",
+                    "rate_limit_exceeded",
+                    "max_tokens",
+                    "unknown_error",
+                ]:
+                    self.history_messages = [
+                        self.history_messages[0]
+                    ] + self.history_messages[3:]
+                else:
+                    raise Exception(f"Failed to call LLM, response: {response}")
+
+        try:
+            action = self.parse_action(response)
+            thought = re.search(r"Thought:(.*?)Action", response, flags=re.DOTALL)
+            if thought:
+                thought = thought.group(1).strip()
+            else:
+                thought = response
+        except ValueError as e:
+            print("Failed to parse action from response", e)
+            action = None
+
+        logger.info("Observation: %s", obs)
+        logger.info("Response: %s", response)
+
+        self._add_message(obs, thought, action)
+        self.observations.append(obs)
+        self.thoughts.append(thought)
+        self.responses.append(response)
+        self.actions.append(action)
+
+        # if action is not None:
+        #     self.codes.append(action.code)
+        # else:
+        #     self.codes.append(None)
+
+        return response, action
+
+    def self_consistency_predict(self, obs: Dict = None, num_samples=5) -> List:
         """
         Predict the next action(s) based on the current observation.
         """

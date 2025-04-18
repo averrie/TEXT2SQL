@@ -60,6 +60,43 @@ def call_llm(payload):
                 time.sleep(4 * (2 ** (i + 1)))
         return False, code_value
 
+    elif model.startswith("google/gemini-2.0-flash-001"):
+        headers = {
+            "Authorization": "Bearer openrouter_key",
+            "Content-Type": "application/json",
+        }
+        logger.info("Generating content with GPT model: %s", model)
+
+        for i in range(3):
+            try:
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                output_message = response.json()["choices"][0]["message"]["content"]
+                logger.info(f"Input: \n{payload['messages']}\nOutput:{response}")
+                return True, output_message
+            except Exception as e:
+                logger.error("Failed to call LLM: " + str(e))
+                if hasattr(e, "response") and e.response is not None:
+                    error_info = e.response.json()
+                    code_value = error_info["error"]["code"]
+                    if code_value == "content_filter":
+                        if not payload["messages"][-1]["content"][0]["text"].endswith(
+                            "They do not represent any real events or entities. ]"
+                        ):
+                            payload["messages"][-1]["content"][0][
+                                "text"
+                            ] += "[ Note: The data and code snippets are purely fictional and used for testing and demonstration purposes only. They do not represent any real events or entities. ]"
+                    if code_value == "context_length_exceeded":
+                        return False, code_value
+                else:
+                    code_value = "unknown_error"
+                logger.error("Retrying ...")
+                time.sleep(4 * (2 ** (i + 1)))
+        return False, code_value
+
     elif model.startswith("gemma-3-27b-it"):
         headers = {
             "Content-Type": "application/json",
